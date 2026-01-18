@@ -29,8 +29,41 @@
     .custom-scrollbar::-webkit-scrollbar { width: 6px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: rgba(51, 65, 85, 0.3); border-radius: 4px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(168, 85, 247, 0.5); border-radius: 4px; }
-    .highlighted { animation: pulse 0.3s ease-out; }
-    @keyframes pulse { 0% { transform: scale(1.1); } 100% { transform: scale(1); } }
+    
+    /* Word highlighting with pacer animation */
+    .word-highlight {
+      background: linear-gradient(135deg, #a855f7, #ec4899);
+      color: white !important;
+      padding: 2px 6px;
+      border-radius: 4px;
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.6), 0 0 40px rgba(168, 85, 247, 0.3);
+      animation: pacerPulse 0.5s ease-out;
+      display: inline-block;
+      transform: scale(1.05);
+    }
+    
+    @keyframes pacerPulse { 
+      0% { transform: scale(1.2); box-shadow: 0 0 30px rgba(168, 85, 247, 0.8); } 
+      100% { transform: scale(1.05); box-shadow: 0 0 20px rgba(168, 85, 247, 0.6); } 
+    }
+    
+    /* Pacer line indicator */
+    .pacer-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #a855f7, #ec4899, #a855f7, transparent);
+      pointer-events: none;
+      z-index: 10;
+      animation: pacerGlow 1s ease-in-out infinite alternate;
+    }
+    
+    @keyframes pacerGlow {
+      0% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
+    
     .slide-up { animation: slideUp 0.3s ease-out; }
     @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     input[type="range"] { -webkit-appearance: none; height: 8px; border-radius: 4px; }
@@ -46,6 +79,28 @@
     /* Active state feedback for touch */
     button:active { transform: scale(0.95); }
     #playPauseBtn:active { transform: scale(0.9); }
+    
+    /* Page turn animation */
+    .page-turning {
+      animation: pageTurn 0.4s ease-out;
+    }
+    
+    @keyframes pageTurn {
+      0% { opacity: 0.5; transform: translateX(20px); }
+      100% { opacity: 1; transform: translateX(0); }
+    }
+    
+    /* Smooth word transitions */
+    .word {
+      transition: all 0.15s ease-out;
+      display: inline;
+      padding: 1px 0;
+    }
+    
+    .word:hover {
+      background: rgba(168, 85, 247, 0.2);
+      border-radius: 3px;
+    }
   </style>
 </head>
 <body class="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white min-h-screen">
@@ -314,6 +369,9 @@
     let audioUnlocked = false;
     let currentAudio = null;
     let wordTrackingInterval = null;
+    let pacerInterval = null;
+    let speechStartTime = null;
+    let wordsSpokenEstimate = 0;
 
     // DOM Elements
     const $ = id => document.getElementById(id);
@@ -727,10 +785,15 @@
         
         await page.render({ canvasContext: ctx, viewport }).promise;
         
+        const pageWordCount = pageText.split(/\s+/).filter(w => w).length;
+        const startWordIndex = fullText.split(/\s+/).filter(w => w).length;
+        
         pages.push({
           pageNumber: i,
           image: canvas.toDataURL('image/jpeg', 0.85),
-          text: pageText
+          text: pageText,
+          wordCount: pageWordCount,
+          startWordIndex: startWordIndex
         });
         
         fullText += pageText + ' ';
@@ -814,8 +877,8 @@
     function renderText() {
       const container = $('textContent');
       container.innerHTML = state.words.map((word, i) => 
-        `<span class="word cursor-pointer hover:bg-purple-200/30 transition-all ${
-          i === state.currentWordIndex ? 'highlighted bg-purple-500 text-white px-1 rounded font-semibold' : ''
+        `<span class="word cursor-pointer ${
+          i === state.currentWordIndex ? 'word-highlight' : ''
         }" data-index="${i}">${word} </span>`
       ).join('');
       
@@ -830,6 +893,86 @@
       });
       
       scrollToCurrentWord();
+    }
+    
+    // Update just the highlighted word without re-rendering everything
+    function updatePacer() {
+      const container = $('textContent');
+      if (!container) return;
+      
+      // Remove previous highlight
+      const prevHighlight = container.querySelector('.word-highlight');
+      if (prevHighlight) {
+        prevHighlight.classList.remove('word-highlight');
+      }
+      
+      // Add new highlight
+      const words = container.querySelectorAll('.word');
+      if (words[state.currentWordIndex]) {
+        words[state.currentWordIndex].classList.add('word-highlight');
+        
+        // Auto-scroll to keep the word visible
+        if (state.autoScroll) {
+          words[state.currentWordIndex].scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'center' 
+          });
+        }
+      }
+      
+      updateProgress();
+      checkPageAdvance();
+    }
+    
+    // Check if we need to advance to next PDF page
+    function checkPageAdvance() {
+      if (!state.isPdfMode || state.pdfPages.length === 0 || !state.isPlaying) return;
+      
+      // Find which page the current word is on
+      for (let i = 0; i < state.pdfPages.length; i++) {
+        const page = state.pdfPages[i];
+        const pageStart = page.startWordIndex || 0;
+        const pageEnd = pageStart + (page.wordCount || 0);
+        
+        if (state.currentWordIndex >= pageStart && state.currentWordIndex < pageEnd) {
+          // Current word is on this page
+          if (state.currentPdfPage !== i) {
+            console.log(`📖 Auto-advancing to page ${i + 1}`);
+            state.currentPdfPage = i;
+            renderPdfPage();
+            
+            // Add page turn animation
+            const pdfContent = $('pdfContent');
+            if (pdfContent) {
+              pdfContent.classList.add('page-turning');
+              setTimeout(() => pdfContent.classList.remove('page-turning'), 400);
+            }
+            
+            // Scroll PDF to top when page changes
+            if (pdfContent && state.autoScroll) {
+              pdfContent.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+          }
+          return;
+        }
+      }
+      
+      // Fallback: Calculate based on cumulative word count
+      let wordCount = 0;
+      for (let i = 0; i < state.pdfPages.length; i++) {
+        const pageText = state.pdfPages[i].text || '';
+        const pageWordCount = pageText.split(/\s+/).filter(w => w).length;
+        
+        if (state.currentWordIndex < wordCount + pageWordCount) {
+          if (state.currentPdfPage !== i) {
+            console.log(`📖 Fallback: advancing to page ${i + 1}`);
+            state.currentPdfPage = i;
+            renderPdfPage();
+          }
+          return;
+        }
+        wordCount += pageWordCount;
+      }
     }
 
     function renderPdfPage() {
@@ -858,7 +1001,8 @@
 
     function scrollToCurrentWord() {
       if (!state.autoScroll) return;
-      const highlighted = document.querySelector('.highlighted');
+      
+      const highlighted = document.querySelector('.word-highlight');
       if (highlighted) {
         highlighted.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
@@ -943,8 +1087,10 @@
             stopPlayback();
           };
           
-          // Simulate word tracking
+          // Use pacer for word tracking with Puter TTS
           const wordsPerSecond = 2.5 * state.rate;
+          speechStartTime = Date.now();
+          
           wordTrackingInterval = setInterval(() => {
             if (!state.isPlaying) {
               clearInterval(wordTrackingInterval);
@@ -956,8 +1102,7 @@
               clearInterval(wordTrackingInterval);
               wordTrackingInterval = null;
             } else {
-              if (!state.isPdfMode) renderText();
-              updateProgress();
+              updatePacer(); // Use pacer instead of full re-render
             }
           }, 1000 / wordsPerSecond);
         } catch (e) {
@@ -993,7 +1138,6 @@
       }
       
       // Chunk size - smaller chunks work better on mobile
-      // Use ~50 words per chunk for mobile, ~200 for desktop
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       const chunkSize = isMobile ? 50 : 200;
       
@@ -1011,50 +1155,63 @@
       }
       
       const chunkStartIndex = state.currentWordIndex;
+      let boundaryWorking = false;
       
       utterance.onboundary = (e) => {
         if (e.name === 'word' && state.isPlaying) {
+          boundaryWorking = true;
           let charCount = 0;
           for (let i = 0; i < chunkWords.length; i++) {
             charCount += chunkWords[i].length + 1;
             if (charCount > e.charIndex) {
               state.currentWordIndex = chunkStartIndex + i;
-              if (!state.isPdfMode) renderText();
-              updateProgress();
+              updatePacer();
               break;
             }
           }
         }
       };
       
+      utterance.onstart = () => {
+        console.log('🔊 Chunk started, words:', chunkWords.length);
+        speechStartTime = Date.now();
+        
+        // Start fallback pacer (in case onboundary doesn't work on this device)
+        // This estimates word position based on time elapsed
+        startFallbackPacer(chunkStartIndex, chunkWords.length);
+      };
+      
       utterance.onend = () => {
         if (!state.isPlaying) return;
         
+        // Stop fallback pacer
+        stopFallbackPacer();
+        
         // Move to end of this chunk
         state.currentWordIndex = chunkStartIndex + chunkWords.length;
+        updatePacer();
         
         if (state.currentWordIndex >= state.words.length) {
           // Finished all text
           state.currentWordIndex = state.words.length - 1;
           stopPlayback();
         } else {
-          // Speak next chunk
+          // Speak next chunk with small delay
           setTimeout(() => {
             if (state.isPlaying) {
               speakChunked();
             }
-          }, 50);
+          }, 100);
         }
       };
       
       utterance.onerror = (e) => {
         console.error('Speech error:', e);
-        // Try to recover on mobile
+        stopFallbackPacer();
+        
         if (e.error === 'interrupted' || e.error === 'canceled') {
-          // User or system interrupted - stop gracefully
           stopPlayback();
         } else {
-          // Other error - try next chunk
           state.currentWordIndex = chunkStartIndex + chunkWords.length;
           if (state.isPlaying && state.currentWordIndex < state.words.length) {
             setTimeout(() => speakChunked(), 100);
@@ -1064,17 +1221,59 @@
         }
       };
       
-      // Chrome Android bug workaround: pause/resume to keep speech alive
+      // Chrome Android bug workaround
       if (isMobile) {
+        if (keepAliveInterval) clearInterval(keepAliveInterval);
         keepAliveInterval = setInterval(() => {
           if (speechSynthesis.speaking && !speechSynthesis.paused) {
             speechSynthesis.pause();
             speechSynthesis.resume();
           }
-        }, 10000); // Every 10 seconds
+        }, 10000);
       }
       
       speechSynthesis.speak(utterance);
+    }
+    
+    // Fallback pacer for devices where onboundary doesn't work
+    function startFallbackPacer(startIndex, wordCount) {
+      stopFallbackPacer(); // Clear any existing
+      
+      // Average speaking rate: ~150 words per minute at 1x speed
+      // Adjusted for current rate setting
+      const wordsPerSecond = (150 / 60) * state.rate;
+      const msPerWord = 1000 / wordsPerSecond;
+      
+      let wordOffset = 0;
+      
+      pacerInterval = setInterval(() => {
+        if (!state.isPlaying) {
+          stopFallbackPacer();
+          return;
+        }
+        
+        wordOffset++;
+        const newIndex = startIndex + wordOffset;
+        
+        if (newIndex < startIndex + wordCount && newIndex < state.words.length) {
+          // Only update if onboundary hasn't been working
+          const timeSinceStart = Date.now() - speechStartTime;
+          const expectedWordIndex = startIndex + Math.floor(timeSinceStart / msPerWord);
+          
+          // Use the time-based estimate
+          if (expectedWordIndex > state.currentWordIndex && expectedWordIndex < startIndex + wordCount) {
+            state.currentWordIndex = expectedWordIndex;
+            updatePacer();
+          }
+        }
+      }, msPerWord);
+    }
+    
+    function stopFallbackPacer() {
+      if (pacerInterval) {
+        clearInterval(pacerInterval);
+        pacerInterval = null;
+      }
     }
 
     function stopPlayback() {
@@ -1106,6 +1305,9 @@
         clearInterval(wordTrackingInterval);
         wordTrackingInterval = null;
       }
+      
+      // Stop the pacer
+      stopFallbackPacer();
       
       $('playIcon').classList.remove('hidden');
       $('pauseIcon').classList.add('hidden');
