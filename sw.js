@@ -1,4 +1,4 @@
-const CACHE_NAME = 'speechify-pwa-v1';
+const CACHE_NAME = 'speechify-pwa-v2';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -20,8 +20,7 @@ self.addEventListener('install', (event) => {
           return new Request(url, { mode: 'cors' });
         })).catch(err => {
           console.log('[SW] Some assets failed to cache:', err);
-          // Continue even if some external resources fail
-          return cache.addAll(['/index.html', '/manifest.json']);
+          return cache.addAll(['./index.html', './manifest.json']);
         });
       })
       .then(() => {
@@ -65,25 +64,20 @@ self.addEventListener('fetch', (event) => {
     caches.match(event.request)
       .then((cachedResponse) => {
         if (cachedResponse) {
-          // Return cached version
           console.log('[SW] Serving from cache:', event.request.url);
           return cachedResponse;
         }
         
-        // Not in cache, fetch from network
         return fetch(event.request)
           .then((response) => {
-            // Don't cache if not a valid response
             if (!response || response.status !== 200 || response.type !== 'basic') {
               return response;
             }
             
-            // Clone response for caching
             const responseToCache = response.clone();
             
             caches.open(CACHE_NAME)
               .then((cache) => {
-                // Cache successful responses for static assets
                 if (event.request.url.includes('.js') || 
                     event.request.url.includes('.css') ||
                     event.request.url.includes('.html')) {
@@ -94,9 +88,8 @@ self.addEventListener('fetch', (event) => {
             return response;
           })
           .catch(() => {
-            // Network failed, return offline page for navigation requests
             if (event.request.mode === 'navigate') {
-              return caches.match('/index.html');
+              return caches.match('./index.html');
             }
             return new Response('Offline', { status: 503, statusText: 'Offline' });
           });
@@ -117,8 +110,8 @@ self.addEventListener('push', (event) => {
     const data = event.data.json();
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: '/icon-192.png',
-      badge: '/icon-192.png'
+      icon: './icon-192.png',
+      badge: './icon-192.png'
     });
   }
 });
