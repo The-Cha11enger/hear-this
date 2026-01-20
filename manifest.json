@@ -2,7 +2,7 @@
   "name": "Speechify Clone - Text to Speech Reader",
   "short_name": "Speechify",
   "description": "Advanced text-to-speech reader with OCR, PDF support, and library management",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#1e1b4b",
   "theme_color": "#7c3aed",
